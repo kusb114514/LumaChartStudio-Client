@@ -1,0 +1,31 @@
+# These run on, or are applied on, the macOS build VM. CRLF breaks both: bash
+# rejects the scripts and `git apply` rejects the patches.
+*.sh text eol=lf
+*.patch -text
+
+# The chart fixtures are pinned by SHA256 in LumaChart.Avalonia.Specs and in
+# Test-WindowsAvaloniaSlice.ps1, so their bytes are part of the contract. Git's
+# system config on Windows sets autocrlf=true, which rewrote them to CRLF on
+# checkout: the blobs are LF, this working tree happened to hold LF because the
+# files were never re-checked-out, and every fresh clone got CRLF and failed
+# pro-editor-malody-noteref-fixture-present-with-trusted-hash on the first run.
+# Pinning a hash only works if the bytes are the same everywhere.
+TestFixtures/** -text
+
+# Upstream licence texts, stored and checked out exactly as their authors
+# published them. NAIST/ICOT and the OFL both require the notice to accompany
+# every copy, so the copy has to be the notice -- not a line-ending-normalised
+# rendering of it. Without this, autocrlf rewrote the two IPADIC files on the
+# way in and the committed blobs no longer matched upstream byte for byte.
+# IPADIC-COPYING.txt also carries stray trailing bytes from upstream that any
+# re-encoding would silently drop.
+licenses/** -text
+
+# GitHub counts bytes per language, so the 120 GUI-capture and test-harness
+# scripts under tools/ (4.7 MB) showed up as 42.8% of the project. They are
+# verification tooling, not product code; this keeps them out of the language
+# stats only. Nothing about the build or the scripts themselves changes. The
+# build scripts under LumaChart.ClientSecurity.Native are still counted --
+# they produce a binary the Android client ships.
+tools/**/*.ps1 linguist-detectable=false
+tools/**/*.psm1 linguist-detectable=false

@@ -1,0 +1,218 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Stated because the generated manifest otherwise carries a
+	     CFBundleDevelopmentRegion that is not a string, which iOS complains
+	     about on every launch:
+
+	       WARNING: This app's CFBundleDevelopmentRegion is not a string value.
+	       This can lead to unexpected results at runtime.
+
+	     The editor's own UI is Simplified Chinese and there are no .lproj
+	     bundles, so this is the honest fallback rather than a placeholder. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>LumaChart Studio</string>
+	<key>CFBundleName</key>
+	<string>LumaChart Studio</string>
+	<!-- No CFBundleIdentifier here on purpose. The SDK fills it in from
+	     $(ApplicationId), which LumaChart.iOS.csproj drives from
+	     $(LumaChartBundleId) so a self-signer can override it on the command
+	     line. Stating it in this file silently defeated that: the manifest
+	     compiler only supplies the value when the key is absent, so
+	     -p:LumaChartBundleId=... built a bundle that still called itself
+	     cc.lumachart.studio, and the mismatch only surfaced at signing time. -->
+	<key>CFBundleVersion</key>
+	<string>13000</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.3.0.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+
+	<!-- Icons are declared here rather than compiled from an asset catalogue;
+	     see the BundleResource block in LumaChart.iOS.csproj for why. iOS
+	     resolves each entry by prefix, picking the @2x/@3x and ~ipad file that
+	     fits the device, so the names carry no scale suffix. There is
+	     deliberately no CFBundleIconName: that key points at an asset catalogue
+	     entry and would send the system looking for an Assets.car. -->
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon29x29</string>
+				<string>AppIcon40x40</string>
+				<string>AppIcon60x60</string>
+			</array>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon29x29</string>
+				<string>AppIcon40x40</string>
+				<string>AppIcon60x60</string>
+				<string>AppIcon76x76</string>
+				<string>AppIcon83.5x83.5</string>
+			</array>
+		</dict>
+	</dict>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>MinimumOSVersion</key>
+	<string>15.0</string>
+
+	<!-- 1 = iPhone, 2 = iPad. The tablet milestone targets iPad; the app still
+	     installs on iPhone so it can be self-signed there, but only the
+	     landscape orientations below are offered and iPhone-specific
+	     navigation has not been adapted yet. -->
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
+
+	<!-- Presentation is deliberately left at the platform defaults for now.
+	     An earlier version locked the app to landscape and declared
+	     UIRequiresFullScreen, UIStatusBarHidden and
+	     UIViewControllerBasedStatusBarAppearance; that build rendered nothing at
+	     all on iPadOS 26, not even a bare TextBlock, while Avalonia's own
+	     template — which declares none of these — rendered normally on the same
+	     device. iPadOS 26 runs the new windowing system, and the re-signing tool
+	     additionally rewrites MinimumOSVersion to 10.0, so an app asking for
+	     legacy full-screen presentation is exactly the case most likely to be
+	     mishandled.
+
+	     Landscape locking and full-screen presentation belong to the iPad layout
+	     slice, and must be reintroduced one key at a time against a build that is
+	     known to render. -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+
+	<!-- Exposes the chart library under Documents/ in the Files app, which is
+	     how charts and audio get in and out of an iOS sandbox. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+
+	<!-- "Open with LumaChart" from Files, a browser or a chat app.
+
+	     The four chart types are declared as *imported* rather than exported:
+	     .mc/.mcz belong to Malody and .osu/.osz to osu!, and claiming to own
+	     them would fight those apps over the same extensions on a device that
+	     has both installed. Importing states what we can read without asserting
+	     authorship, which is also why the handler rank is Alternate — if Malody
+	     is installed it stays the default for its own files.
+
+	     AppDelegate.OpenUrl receives the URL; see the comment there for why the
+	     bytes are copied immediately and the open is queued. -->
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>cc.lumachart.chart.malody</string>
+			<key>UTTypeDescription</key>
+			<string>Malody 谱面</string>
+			<key>UTTypeConformsTo</key>
+			<array><string>public.data</string></array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array><string>mc</string></array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>cc.lumachart.chart.malody-package</string>
+			<key>UTTypeDescription</key>
+			<string>Malody 谱包</string>
+			<key>UTTypeConformsTo</key>
+			<array><string>public.zip-archive</string></array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array><string>mcz</string></array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>cc.lumachart.chart.osu</string>
+			<key>UTTypeDescription</key>
+			<string>osu!mania 谱面</string>
+			<key>UTTypeConformsTo</key>
+			<array><string>public.data</string></array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array><string>osu</string></array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>cc.lumachart.chart.osu-package</string>
+			<key>UTTypeDescription</key>
+			<string>osu! 谱包</string>
+			<key>UTTypeConformsTo</key>
+			<array><string>public.zip-archive</string></array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array><string>osz</string></array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>谱面与谱包</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>cc.lumachart.chart.malody</string>
+				<string>cc.lumachart.chart.malody-package</string>
+				<string>cc.lumachart.chart.osu</string>
+				<string>cc.lumachart.chart.osu-package</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+
+	<!-- No UIApplicationSceneManifest on purpose. Avalonia's own iOS template
+	     does not declare one and works; adding one was tried while chasing an
+	     unrelated crash and is not what Avalonia.iOS expects. -->
+
+	<!-- A storyboard launch screen cannot be built in the current VM: it has no
+	     Simulator runtime, so ibtool and actool both fail. The empty dictionary
+	     form needs neither, which is also why there is no app icon asset
+	     catalogue yet. -->
+	<key>UILaunchScreen</key>
+	<dict/>
+</dict>
+</plist>

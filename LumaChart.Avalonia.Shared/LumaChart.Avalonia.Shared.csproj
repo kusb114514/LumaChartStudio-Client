@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\LumaChart.Avalonia.SharedSource.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Android keeps the Windows compatibility surfaces that reference
+         Avalonia.Win32.Input and Win32PlatformOptions. iOS omits this package,
+         so those two code paths are compiled out there instead. -->
+    <PackageReference Include="Avalonia.Win32" Version="$(LumaChartAvaloniaVersion)" />
+  </ItemGroup>
+</Project>

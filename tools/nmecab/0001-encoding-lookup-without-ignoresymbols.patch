@@ -1,0 +1,63 @@
+diff --git a/src/LibNMeCab/Core/StrUtils.cs b/src/LibNMeCab/Core/StrUtils.cs
+index 9b8684a..36a7279 100644
+--- a/src/LibNMeCab/Core/StrUtils.cs
++++ b/src/LibNMeCab/Core/StrUtils.cs
+@@ -90,12 +90,35 @@ namespace NMeCab.Core
+         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static Encoding GetEncodingOrNull(this string name)
+         {
+-            var cmpInf = CultureInfo.InvariantCulture.CompareInfo;
+-            var opt = CompareOptions.IgnoreCase | CompareOptions.IgnoreSymbols;
++            // LumaChart patch. Was:
++            //
++            //   var cmpInf = CultureInfo.InvariantCulture.CompareInfo;
++            //   var opt = CompareOptions.IgnoreCase | CompareOptions.IgnoreSymbols;
++            //   if (cmpInf.Compare(encInf.Name, name, opt) == 0) ...
++            //
++            // .NET on Apple mobile answers globalization through the platform
++            // instead of ICU, and that implementation refuses IgnoreSymbols:
++            //
++            //   PlatformNotSupportedException:
++            //   PlatformNotSupported_HybridGlobalizationWithCompareOptions,
++            //   IgnoreCase, IgnoreSymbols
++            //
++            // It threw on the very first comparison, so no charset could ever be
++            // resolved and MeCabIpaDicTagger.Create failed outright, taking
++            // Kawazu's converter and every kanji reading with it.
++            //
++            // The documented intent above is "ignore case and separator symbols",
++            // which for names like utf-8 against utf8 means: keep the letters and
++            // digits, drop the rest, compare ordinally without case. That needs no
++            // collator and behaves identically on every platform.
++            var wanted = StripNonAlphanumeric(name);
+ 
+             foreach (var encInf in Encoding.GetEncodings())
+             {
+-                if (cmpInf.Compare(encInf.Name, name, opt) == 0)
++                if (string.Equals(
++                        StripNonAlphanumeric(encInf.Name),
++                        wanted,
++                        StringComparison.OrdinalIgnoreCase))
+                 {
+                     return encInf.GetEncoding();
+                 }
+@@ -104,6 +127,19 @@ namespace NMeCab.Core
+             return null;
+         }
+ 
++        private static string StripNonAlphanumeric(string value)
++        {
++            if (string.IsNullOrEmpty(value)) return string.Empty;
++
++            var buffer = new StringBuilder(value.Length);
++            foreach (var character in value)
++            {
++                if (char.IsLetterOrDigit(character)) buffer.Append(character);
++            }
++
++            return buffer.ToString();
++        }
++
+         /// <summary>
+         /// 単一行のCSV形式の文字列を配列に変換する
+         /// </summary>

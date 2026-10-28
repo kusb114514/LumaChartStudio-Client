@@ -1,0 +1,12 @@
+﻿<Solution>
+  <Project Path="LumaChart.Application/LumaChart.Application.csproj" />
+  <Project Path="LumaChart.Android/LumaChart.Android.csproj" />
+  <Project Path="LumaChart.Avalonia/LumaChart.Avalonia.csproj" />
+  <Project Path="LumaChart.Avalonia.Mobile/LumaChart.Avalonia.Mobile.csproj" />
+  <Project Path="LumaChart.Avalonia.Shared/LumaChart.Avalonia.Shared.csproj" />
+  <Project Path="LumaChart.Avalonia.Specs/LumaChart.Avalonia.Specs.csproj" />
+  <Project Path="LumaChart.Core/LumaChart.Core.csproj" />
+  <Project Path="LumaChart.Online/LumaChart.Online.csproj" />
+  <Project Path="LumaChart.Specs/LumaChart.Specs.csproj" />
+  <Project Path="LumaChart.Storage.Abstractions/LumaChart.Storage.Abstractions.csproj" />
+</Solution>

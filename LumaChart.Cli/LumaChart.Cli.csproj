@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>lumatool</AssemblyName>
+    <RootNamespace>LumaChart.Cli</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LumaChart.Core\LumaChart.Core.csproj" />
+    <ProjectReference Include="..\LumaChart.Application\LumaChart.Application.csproj" />
+    <ProjectReference Include="..\LumaChart.Online\LumaChart.Online.csproj" />
+    <ProjectReference Include="..\LumaChart.Storage.Abstractions\LumaChart.Storage.Abstractions.csproj" />
+  </ItemGroup>
+
+  <!--
+    The per-chart metadata store (group names/colours, presets, annotations)
+    sits in the Avalonia tree because that is where the editor keeps it, but the
+    three files below only touch System.Text.Json and LumaChart.Core.Models, so
+    this project links the same sources instead of forking a second copy that
+    would drift. It is the same trick LumaChart.Avalonia.SharedSource.props uses
+    to feed the Android and iOS hosts from one tree.
+
+    AvaloniaAppPaths is deliberately NOT linked: it reaches into the editor's
+    single-instance policy and storage registration. Shared\AvaloniaAppPathsCliShim.cs
+    supplies the one member the store actually reads.
+  -->
+  <ItemGroup>
+    <Compile Include="..\LumaChart.Avalonia\Infrastructure\WindowsGroupCatalogStore.cs"
+             Link="Shared\WindowsGroupCatalogStore.cs" />
+    <Compile Include="..\LumaChart.Avalonia\Infrastructure\WindowsSettingsFileGuard.cs"
+             Link="Shared\WindowsSettingsFileGuard.cs" />
+    <Compile Include="..\LumaChart.Avalonia\Infrastructure\WindowsDiagnosticLog.cs"
+             Link="Shared\WindowsDiagnosticLog.cs" />
+    <!--
+      The store serialises annotation anchors and group definitions with this
+      converter, so the CLI has to compile the same one the editor does: linking
+      the store without it is a missing type, not a runtime surprise.
+    -->
+    <Compile Include="..\LumaChart.Avalonia\Infrastructure\BeatPositionJsonConverter.cs"
+             Link="Shared\BeatPositionJsonConverter.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,100 @@
+<!--
+  The one description of "compile the Avalonia editor source for a mobile host".
+
+  LumaChart.Avalonia is the Windows host and simultaneously the full Avalonia UI
+  source tree. Mobile hosts do not fork that UI; they recompile the same files.
+  Android does this through LumaChart.Avalonia.Shared and iOS through
+  LumaChart.Avalonia.Mobile, so the file list and the shared package set live
+  here instead of being duplicated in two csproj files that would drift.
+
+  Only the genuinely platform-specific parts stay in the importing projects:
+  Android keeps Avalonia.Win32 (it is still referenced by the Windows-oriented
+  compatibility surfaces it compiles), and iOS deliberately omits it.
+-->
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <DefineConstants>$(DefineConstants);LUMACHART_SHARED</DefineConstants>
+
+    <!--
+      Windows and Android stay on the version they were verified against. Only
+      the iOS target framework moves, because 12.1.0 renders nothing at all on
+      device there — not even a bare TextBlock attached to the single-view
+      lifetime — while Avalonia's own 12.1.1 template renders normally on the
+      same device, SDK band and toolchain. Keeping the bump scoped to the iOS
+      target framework means the shipping Windows and Android clients are
+      untouched by this.
+    -->
+    <LumaChartAvaloniaVersion>12.1.0</LumaChartAvaloniaVersion>
+    <LumaChartAvaloniaVersion Condition="'$(TargetFramework)' == 'net10.0-ios26.2'">12.1.1</LumaChartAvaloniaVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)LumaChart.Application\LumaChart.Application.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)LumaChart.Core\LumaChart.Core.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)LumaChart.Online\LumaChart.Online.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)LumaChart.Storage.Abstractions\LumaChart.Storage.Abstractions.csproj" />
+  </ItemGroup>
+
+  <!--
+    Program.cs is the Windows desktop entry point and drags in Win32 startup
+    policy; each mobile host supplies its own Avalonia Application class.
+  -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)LumaChart.Avalonia\**\*.cs"
+             Exclude="$(MSBuildThisFileDirectory)LumaChart.Avalonia\Program.cs;$(MSBuildThisFileDirectory)LumaChart.Avalonia\AndroidApp.cs;$(MSBuildThisFileDirectory)LumaChart.Avalonia\obj\**\*.cs;$(MSBuildThisFileDirectory)LumaChart.Avalonia\bin\**\*.cs" />
+  </ItemGroup>
+
+  <!--
+    Embedded Chinese typeface, shared by both mobile hosts.
+
+    Windows resolves Segoe UI Variable Text and Microsoft YaHei UI from the
+    system, so the desktop project (which does not import this file) never
+    embeds this and is unchanged. The mobile hosts have no such guarantee:
+    the theme asks for those two Windows families, neither exists on a phone,
+    and on some OEM Android ROMs the Skia fallback for a missing named family
+    lands on a Latin-only typeface whose per-glyph fallback does not cover CJK
+    — so Chinese text simply did not paint on those devices (reported as
+    "文字显示不全"), and because it is the ROM's own font set, reinstalling and
+    rebooting changed nothing. Embedding a complete Simplified-Chinese face and
+    making it the default/fallback (see MobileFontConfiguration) removes the
+    dependency on the device's fonts entirely.
+
+    Source Han Sans CN (思源黑体 CN), Regional Subset OTF, Regular weight,
+    SIL Open Font License 1.1 — see THIRD-PARTY-NOTICES.md. The <Link> fixes the
+    in-assembly avares path so it is identical whether this compiles into
+    LumaChart.Avalonia.Shared (Android) or LumaChart.Avalonia.Mobile (iOS);
+    MobileFontConfiguration derives the assembly name at runtime.
+  -->
+  <ItemGroup>
+    <AvaloniaResource Include="$(MSBuildThisFileDirectory)LumaChart.Avalonia\Assets\Fonts\SourceHanSansCN-Regular.otf"
+                      Link="Assets/Fonts/SourceHanSansCN-Regular.otf" />
+  </ItemGroup>
+
+  <!--
+    The display-language catalogs need no wiring here: they are embedded in
+    LumaChart.Core, which every host already references, and are read as an
+    assembly resource rather than an Avalonia asset.
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="$(LumaChartAvaloniaVersion)" />
+    <PackageReference Include="Avalonia.HarfBuzz" Version="$(LumaChartAvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Skia" Version="$(LumaChartAvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(LumaChartAvaloniaVersion)" />
+    <PackageReference Include="Kawazu" Version="1.1.4" />
+    <PackageReference Include="LibNMeCab.IpaDicBin" Version="0.10.0" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="NAudio.Vorbis" Version="1.5.0" />
+    <!-- Fully managed MP3 frame decoder. NAudio's default decompressor is the
+         Windows ACM codec, which does not exist on Android or iOS. -->
+    <PackageReference Include="NLayer.NAudioSupport" Version="2.0.1" />
+    <PackageReference Include="OggVorbisEncoder" Version="1.2.2" />
+    <PackageReference Include="SoundTouch.Net.NAudioSupport.Core" Version="2.3.2" />
+    <PackageReference Include="WanaKana-net" Version="1.0.0" />
+  </ItemGroup>
+</Project>

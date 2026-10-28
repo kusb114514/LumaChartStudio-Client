@@ -1,0 +1,40 @@
+# Build output
+bin/
+obj/
+*.user
+.vs/
+
+# Build outputs and the vendored Android toolchain (6+ GB)
+artifacts/
+
+# Restored packages and the pinned SDK home used by the offline builds
+.claude/settings.local.json
+.codex-nuget-packages/
+.codex-dotnet-home/
+.codex-nuget-http-cache/
+.codex-temp/
+
+# Per-session scratch and build output of coding agents. Only the session
+# folders are ignored; the tracked .claude/settings.local.json is unaffected.
+/.claude/*/
+
+# Evidence produced by the spec runs
+audit-artifacts/
+
+# Credentials. This file holds test accounts and server secrets and must never
+# be committed, printed or packaged.
+PRIVATE-OPERATIONS.local.md
+
+# Notes written for this fork's own working sessions. They describe how the
+# changes were made rather than what the software does, so they stay local.
+# Both the markdown and the rendered html copies are excluded.
+HANDOFF-*
+
+# Chart-template source material that is not ours to publish. Kept on disk for
+# local use, excluded from the repository.
+/docs/sv-template/
+
+# The editor's chart library: real songs, their audio and their charts. It
+# normally lives beside the installed client rather than in here, but a repo
+# initialised from an install folder would otherwise sweep it in.
+LumaChart Workspace/

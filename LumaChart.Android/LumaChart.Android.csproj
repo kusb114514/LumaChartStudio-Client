@@ -1,0 +1,78 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <ApplicationId>cc.lumachart.studio</ApplicationId>
+    <ApplicationTitle>LumaChart Studio</ApplicationTitle>
+    <ApplicationVersion>13000</ApplicationVersion>
+    <ApplicationDisplayVersion>1.3.0.0-kusb.1.0</ApplicationDisplayVersion>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <AndroidUseSharedRuntime>false</AndroidUseSharedRuntime>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <RuntimeIdentifiers>android-arm64</RuntimeIdentifiers>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!--
+      Obfuscation is retired for this project. The Avalonia/Android editor never
+      P/Invoked the native ClientSecurity policy module (that boundary lives only
+      in the deprecated WPF LumaChart.App), so the OLLVM-built .so was bundled and
+      build-gated but never loaded at runtime. The native library, its verified
+      manifest/stamp and the RequireVerifiedAndroidNativeSecurity gate are removed;
+      no OLLVM flags or obfuscation participate in the Android build.
+    -->
+  </PropertyGroup>
+
+  <!--
+    Release signing key, taken from the environment so that neither the keystore
+    nor its passwords are ever part of the repository:
+
+      LUMACHART_ANDROID_KEYSTORE    path to the release .keystore / .jks
+      LUMACHART_ANDROID_KEY_ALIAS   alias of the signing key inside it
+      LUMACHART_ANDROID_STORE_PASS  keystore password
+      LUMACHART_ANDROID_KEY_PASS    key password
+
+    The two passwords are handed to the signer by reference (the env: prefix),
+    so they never appear in MSBuild logs either. Without these variables .NET for
+    Android signs with the per-machine debug keystore it generates itself: an APK
+    signed that way cannot update an installed release, and a user would have to
+    uninstall — deleting the chart library — to move between builds from two
+    machines. tools/Build-AndroidApk.ps1 therefore refuses a Release build
+    without them unless -AllowDebugSigning is passed.
+  -->
+  <PropertyGroup Condition="'$(LUMACHART_ANDROID_KEYSTORE)' != ''">
+    <AndroidKeyStore>true</AndroidKeyStore>
+    <AndroidSigningKeyStore>$(LUMACHART_ANDROID_KEYSTORE)</AndroidSigningKeyStore>
+    <AndroidSigningKeyAlias>$(LUMACHART_ANDROID_KEY_ALIAS)</AndroidSigningKeyAlias>
+    <AndroidSigningStorePass>env:LUMACHART_ANDROID_STORE_PASS</AndroidSigningStorePass>
+    <AndroidSigningKeyPass>env:LUMACHART_ANDROID_KEY_PASS</AndroidSigningKeyPass>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LumaChart.Avalonia.Shared\LumaChart.Avalonia.Shared.csproj" />
+    <AndroidResource Include="Resources\drawable\icon.png" />
+    <AndroidAsset Include="$(NuGetPackageRoot)\libnmecab.ipadicbin\0.10.0\content\IpaDic\*.*">
+      <Link>IpaDic\%(Filename)%(Extension)</Link>
+    </AndroidAsset>
+    <!--
+      The APK carries the IPADIC dictionary and Source Han Sans, and both
+      licences require their text to accompany the copy. The notices shipped
+      only on Windows until now, which left the two mobile packages
+      distributing the data without it.
+    -->
+    <AndroidAsset Include="..\THIRD-PARTY-NOTICES.md;..\LICENSE">
+      <Link>licenses\%(Filename)%(Extension)</Link>
+    </AndroidAsset>
+    <AndroidAsset Include="..\licenses\*.txt">
+      <Link>licenses\%(Filename)%(Extension)</Link>
+    </AndroidAsset>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Android" Version="12.1.0" />
+    <PackageReference Include="Xamarin.AndroidX.Core.SplashScreen" Version="1.0.1.15" />
+  </ItemGroup>
+</Project>

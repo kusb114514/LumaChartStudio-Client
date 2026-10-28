@@ -1,0 +1,496 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+      The platform version pins which Microsoft.iOS.Sdk band is used, and the
+      SDK requires an *exact* major.minor Xcode match. Band 26.2 is the one that
+      matches Xcode 26.3 / iPhoneOS 26.2, which is what the build VM has, so
+      `ValidateXcodeVersion` is left on and passes on its own.
+
+      This is not cosmetic. An earlier attempt used band 26.0 with the check
+      disabled, on the theory that a newer Xcode than a band expects is the safe
+      direction. It is not: the resulting binary aborted during runtime startup
+      before any managed code ran. A stock .NET iOS template app survived it
+      because it AOT-compiles almost no IL, but an Avalonia app did not — this
+      was reproduced with Avalonia's own unmodified iOS template, and rebuilding
+      that same template against band 26.2 fixed it.
+
+      If the VM's Xcode changes, change this band with it. Do not disable the
+      check again; install the matching band instead, with a workload rollback
+      file naming `microsoft.net.sdk.ios` at the wanted band.
+    -->
+    <TargetFramework>net10.0-ios26.2</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      For the audio sink only. AudioToolbox hands out AudioQueueBuffer by raw
+      pointer and its AudioData field is where the samples have to be written;
+      there is no copy-free managed form of it. Confined to
+      Platform/IOSAudioOutput.cs.
+    -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!--
+      iOS 15 is a deliberate floor, not a default. It is the oldest release that
+      still receives Apple security updates and it covers every 64-bit iPad that
+      can run the current editor at a usable frame rate. The .NET iOS workload's
+      own default floor moves with the SDK, which would silently change the
+      supported device set between builds.
+    -->
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+
+    <RuntimeIdentifier>ios-arm64</RuntimeIdentifier>
+
+    <!--
+      Trimming stays ON — iOS is AOT-only and the linker is not optional — but
+      in `partial` mode, which trims only assemblies that declare themselves
+      trimmable (the BCL) and copies everything else whole.
+
+      Full trim fails this app for a concrete reason rather than a theoretical
+      one: settings, workspaces, recovery state and the entire Online protocol
+      are reflection-based System.Text.Json, which produced 62 IL2026 findings
+      across LumaChart.Avalonia, LumaChart.Application and LumaChart.Online,
+      plus IL2104 for NAudio.Core and NAudio.Wasapi. Under full trim those
+      types can be removed and the failure appears at runtime as an empty or
+      throwing deserialization, which is exactly the kind of defect this VM
+      cannot detect because it cannot run the app.
+
+      The honest alternatives were source-generated JSON contexts for every
+      persisted and protocol type, or TrimmerRootDescriptor files enumerating
+      them. Both are real work that belongs with the online/settings slices,
+      not with host bring-up, and both would be verified by the same device
+      testing anyway. Partial trim is the deliberate interim: larger payload,
+      no silent reflection loss.
+
+      Revisit when the online slice lands; the goal is to move back to full
+      trim behind source-generated contexts.
+    -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+
+    <!--
+      This target cannot JIT. Say so, or the reflection stack assumes it can.
+
+      .NET 8 rewrote reflective invocation: ConstructorInvoker and MethodInvoker
+      emit a DynamicMethod stub per call site — named InvokeStub_<Type>..ctor
+      with the signature (object, object, intptr*) — whenever
+      RuntimeFeature.IsDynamicCodeCompiled is true, and fall back to a slower
+      non-emitting path when it is false. That flag follows the
+      IsDynamicCodeSupported feature switch in runtimeconfig, and this app
+      shipped with it set to true. Verified by unpacking the .app:
+
+        $ unzip -p LumaChartStudio.ipa Payload/LumaChart.iOS.app/runtimeconfig.bin
+          System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported
+          true
+
+      Not because the iOS SDK wants it — it defaults the property to false for
+      exactly this reason (Xamarin.Shared.Sdk.targets, "This should be set by
+      dotnet/sdk instead") — but because both defaults are written as "only if
+      nobody set it", and the trimmer's fires first:
+
+        Microsoft.NET.ILLink.targets:64
+          <DynamicCodeSupport Condition="'$(DynamicCodeSupport)' == ''">true</...>
+
+      A property stated here is evaluated before either targets file is
+      imported, so it wins over both. Which also means this line cannot be
+      dropped on the assumption that the platform SDK has it covered.
+
+      So every reflective construction in the process compiled a stub and then
+      demanded a JIT that does not exist:
+
+        System.ExecutionEngineException: Attempting to JIT compile method
+        '(wrapper dynamic-method) object object:InvokeStub_SKPaint..ctor
+        (object,object,intptr*)' while running in aot-only mode
+
+      That one fired inside Avalonia's render loop, which catches per-frame
+      exceptions and routes them to its own logger — with no sink installed it
+      is completely silent, so the app stayed up, drew nothing, and left the GPU
+      at zero. The same failure with InvokeStub_SafeFileHandle..ctor meant no
+      file could be created anywhere in the sandbox: directories appeared,
+      files never did, which is why no launch log ever reached the device.
+
+      The reach is wider than those two. System.Text.Json's reflection-based
+      resolver picks ReflectionEmitCachingMemberAccessor off the same switch, so
+      settings, workspaces, recovery state and the whole Online protocol —
+      everything the TrimMode note above is written to protect — would have
+      failed the same way on device while working perfectly on Windows.
+
+      false is not a workaround, it is the accurate value for an AOT-only
+      target: it selects the interpreted invoke path, which needs no codegen.
+
+      For the record, the interpreter was tried first, before the switch was
+      found. MtouchInterpreter=all and UseInterpreter=true both aborted during
+      startup with "Encountered infinite recursion while looking up resource
+      'IO_FileName_Name'", and neither is needed now.
+    -->
+    <DynamicCodeSupport>false</DynamicCodeSupport>
+
+    <!--
+      Full ICU, not the platform's cut-down one.
+
+      The iOS SDK turns HybridGlobalization on for every non-invariant build: it
+      answers globalization from Apple's own APIs instead of shipping ICU data,
+      which is a large size saving and supports most of what an app asks for.
+      Most is not all. It cannot honour every CompareOptions combination, and
+      Japanese romanization walked straight into one — the reading analyser
+      compares with IgnoreCase together with IgnoreSymbols, and on device that
+      threw before it ever reached the dictionary:
+
+        无法分析这段日文的读音：
+        PlatformNotSupported_HybridGlobalizationWithCompareOptions,
+        IgnoreCase, IgnoreSymbols
+
+      The comparison is inside Kawazu/WanaKana, not in code here — this
+      repository contains no CompareOptions at all — so there is no call site to
+      rewrite. The choice is full ICU or no kanji romanization on iOS.
+
+      Costs app size. Measured against the alternative of a feature that reports
+      an unreadable resource key and stops working, it is worth it.
+
+      IT CANNOT BE SET HERE. Unlike the four switches above, the iOS SDK writes
+      this one without asking whether anyone already has:
+
+        Xamarin.Shared.Sdk.targets
+          <HybridGlobalization Condition="'$(InvariantGlobalization)' != 'true'">true</...>
+
+      A value stated in this file is simply overwritten — verified by building
+      with it here and finding System.Globalization.Hybrid=true in the shipped
+      runtimeconfig.bin anyway. Only a command-line global property outranks a
+      targets file, so it lives on the publish command in
+      tools/build-ios-remote.sh. Do not "tidy it up" back into this file.
+    -->
+
+    <!--
+      The same collision, one property over, and it is not cosmetic either.
+
+        Xamarin.Shared.Sdk.targets  UseSystemResourceKeys = true  (non-debug)
+        Microsoft.NET.ILLink.targets UseSystemResourceKeys = false
+
+      both guarded by "only if nobody set it", and the trimmer won again — so
+      the build shipped asking for full resource strings. In this configuration
+      that lookup is broken: resolving one throws a file-not-found whose own
+      message needs the same resource, and System.Private.CoreLib's re-entry
+      guard answers that with an uncatchable FailFast.
+
+        Process terminated.
+        Encountered infinite recursion while looking up resource
+        'IO_FileName_Name' in System.Private.CoreLib.
+
+      It aborted during Avalonia setup the moment anything formatted an
+      exception message — which only started happening once file I/O worked
+      and the launch log stopped discarding its writes. The same abort ended
+      both interpreter experiments, which is now explained: they were not
+      failing to start, they were failing to describe why.
+
+      true restores what the platform SDK asked for. Exception messages become
+      their resource keys rather than English sentences, which costs
+      readability in anything that surfaces Exception.Message; that trade is
+      only acceptable because the alternative here is not readable messages, it
+      is a dead process. Revisit if resource loading is ever fixed for this
+      target; the type name and stack are unaffected either way.
+    -->
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+
+    <!--
+      Third instance of the same collision, and this one was already load
+      bearing before anyone noticed why. The trimmer defaults it OFF:
+
+        Microsoft.NET.ILLink.targets:55
+          <JsonSerializerIsReflectionEnabledByDefault
+             Condition="'$(JsonSerializerIsReflectionEnabledByDefault)' == ''">false</...>
+
+      and the iOS SDK never states an opinion, so without this line every
+      settings load and every Online request would throw at runtime — a failure
+      the build VM cannot observe, because it cannot run the app. This is not
+      belt and braces against a hypothetical future SDK change; it is the only
+      reason reflection-based System.Text.Json works on this target at all.
+      Read it together with the TrimMode note above, which assumes it.
+    -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+
+    <!--
+      Fourth and last, found by dumping the shipped runtimeconfig.bin and
+      comparing every switch against what the iOS SDK asked for:
+
+        Xamarin.Shared.Sdk.targets   false, for non-debug builds
+        Microsoft.NET.ILLink.targets true
+
+      The trimmer won here too. It is the mildest of the four — a start-up
+      validation pass over open generic DI registrations — but it is pure cost
+      on a shipped build, and it throws rather than warns when a registration
+      cannot be verified under trimming, which is a crash this VM cannot see.
+    -->
+    <VerifyDependencyInjectionOpenGenericServiceTrimmability>false</VerifyDependencyInjectionOpenGenericServiceTrimmability>
+
+    <!--
+      IL2026/IL2104 say "these types may be trimmed away". Under the partial
+      trim above they are not: LumaChart.*, Avalonia and NAudio are copied
+      whole and only the BCL is trimmed, so the warnings describe a situation
+      this configuration has already ruled out. They are suppressed here and
+      nowhere else, and they must be reinstated the moment TrimMode moves back
+      to full — which is what makes them worth suppressing narrowly rather than
+      turning off TreatWarningsAsErrors.
+    -->
+    <NoWarn>$(NoWarn);IL2026;IL2104</NoWarn>
+
+    <!--
+      Free Apple IDs rewrite the bundle id when self-signing, so it must be
+      overridable from the command line: -p:LumaChartBundleId=com.example.luma
+      The default stays aligned with the Android package id.
+    -->
+    <LumaChartBundleId Condition="'$(LumaChartBundleId)' == ''">cc.lumachart.studio</LumaChartBundleId>
+    <ApplicationId>$(LumaChartBundleId)</ApplicationId>
+    <ApplicationTitle>LumaChart Studio</ApplicationTitle>
+    <ApplicationVersion>13000</ApplicationVersion>
+    <ApplicationDisplayVersion>1.3.0.0</ApplicationDisplayVersion>
+
+    <!--
+      This project is built in an isolated VM that deliberately holds no Apple
+      account, certificate or provisioning profile. It produces an unsigned .app
+      that the user self-signs on their own machine, so every signing step is
+      switched off rather than left to fail late in the build.
+    -->
+    <EnableCodeSigning>false</EnableCodeSigning>
+    <CodesignKey></CodesignKey>
+    <CodesignProvision></CodesignProvision>
+    <CodesignEntitlements></CodesignEntitlements>
+    <_RequireCodeSigning>false</_RequireCodeSigning>
+    <DisableCodesignVerification>true</DisableCodesignVerification>
+
+    <!--
+      LumaChart.ClientSecurity is intentionally absent on iOS. The user has
+      confirmed the project no longer requires obfuscation and that iOS does not
+      build the native gate, so there is no ios-arm64 ELF, no OLLVM toolchain
+      and no verification target here. The Windows and Android integrations are
+      untouched and keep their own gates.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LumaChart.Avalonia.Mobile\LumaChart.Avalonia.Mobile.csproj" />
+  </ItemGroup>
+
+  <!--
+    The home-screen icon, shipped as plain bundle resources rather than an asset
+    catalogue.
+
+    An Assets.xcassets/AppIcon.appiconset is the modern form and was tried
+    first. actool cut the device icons correctly and then failed the build
+    anyway:
+
+      actool error : No available simulator runtimes for platform
+      iphonesimulator. SimServiceContext supportedRuntimes=[]
+
+    This VM has no Simulator runtime — the same reason Info.plist declares
+    UILaunchScreen as an empty dictionary instead of a storyboard, because
+    ibtool needs one too. Installing a runtime is a multi-gigabyte download onto
+    a QEMU disk for a step whose only output is thirteen resized PNGs.
+
+    So the sizes are cut ahead of time and named the way iOS resolves
+    CFBundleIconFiles: an entry of "AppIcon60x60" matches AppIcon60x60@2x.png
+    and @3x, and the ~ipad suffix selects the tablet variants. No actool, no
+    Assets.car, nothing for the toolchain to fail at.
+
+    The artwork is LumaChart.Avalonia\Assets\app-icon.png, a logo on a transparent
+    background — only about a quarter of its pixels are opaque. An iOS icon must
+    be a full opaque square (iOS applies its own rounded mask and renders alpha
+    as black), so the mark is composited onto the editor's own surface colour,
+    #11171D, at 68% of the canvas so it survives the mask. Regenerate all sizes
+    from one 1024 master the same way if the artwork changes.
+  -->
+  <ItemGroup>
+    <BundleResource Include="Icons\*.png">
+      <Link>%(Filename)%(Extension)</Link>
+    </BundleResource>
+    <!--
+      The app bundle carries the IPADIC dictionary, Source Han Sans and Inter,
+      and each of those licences requires its text to accompany the copy. The
+      notices shipped only on Windows until now, which left the two mobile
+      packages distributing the data without it.
+    -->
+    <BundleResource Include="..\THIRD-PARTY-NOTICES.md;..\LICENSE">
+      <Link>licenses\%(Filename)%(Extension)</Link>
+    </BundleResource>
+    <BundleResource Include="..\licenses\*.txt">
+      <Link>licenses\%(Filename)%(Extension)</Link>
+    </BundleResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Must match the Avalonia version LumaChart.Avalonia.Mobile resolves for
+         this target framework; see LumaChart.Avalonia.SharedSource.props. -->
+    <PackageReference Include="Avalonia.iOS" Version="12.1.1" />
+
+    <!--
+      An embedded default font. Windows and Android resolve one from the system;
+      on iOS, Avalonia's own template registers this explicitly, and a build
+      without it rendered nothing at all here — not even a bare TextBlock — and
+      then trapped inside libSkiaSharp on the finalizer thread, which is what a
+      text run with no usable typeface looks like from the outside.
+    -->
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+
+    <!--
+      SkiaSharp selects its native asset package per target framework, and the
+      shared editor project that pulls in Avalonia.Skia is net8.0 — so the
+      dependency graph resolved SkiaSharp.NativeAssets.Win32/macOS/Linux and
+      never SkiaSharp.NativeAssets.iOS. The managed SkiaSharp.dll shipped while
+      libSkiaSharp did not, which cannot fail at build time and only shows up
+      when Avalonia initializes rendering on the device.
+
+      Referencing it here resolves it against this project's iOS framework.
+      HarfBuzzSharp needs no equivalent line: Avalonia.iOS already brings
+      HarfBuzzSharp.NativeAssets.iOS into the iOS graph.
+    -->
+    <PackageReference Include="SkiaSharp.NativeAssets.iOS" Version="3.119.4" />
+  </ItemGroup>
+
+  <!--
+    Temporary, for the iPadOS 26 black screen.
+
+    Avalonia renders on DisplayLinkTimer's own thread and touches the render
+    layer from there; iOS 26 refuses layer property changes made off the main
+    thread, so the drawable is never attached and every frame is presented into
+    a layer that shows nothing. The fix is one file inside Avalonia.iOS
+    (DisplayLinkTimer drives the display link from the main run loop), and it
+    cannot be applied from here: Avalonia's platform interfaces carry a
+    NotClientImplementable guard, so Avalonia.iOS only compiles inside the
+    Avalonia repository, where its ProjectReferences grant it internals access.
+    Building it standalone against the published packages fails with 103 errors
+    of the form "does not implement interface member ITopLevelImpl.(This
+    interface or abstract class is -not- implementable by user code !)".
+
+    So the assembly is built in a clone of the Avalonia 12.1.1 tag on the build
+    machine and staged at the path below. Avalonia's own SharedVersion.props
+    stamps 12.1.1 and signs with the repository's published avalonia.snk, so
+    the result keeps the identity the rest of the Avalonia packages expect and
+    drops in for the package's own copy.
+
+    Exists() makes this self-disabling: on a machine without the staged file —
+    every Windows checkout, and the Android build — the package's assembly is
+    used unchanged and nothing here applies. Remove this block once the fix is
+    upstream and a released Avalonia carries it.
+  -->
+  <PropertyGroup>
+    <LumaChartPatchedAvaloniaDirectory Condition="'$(LumaChartPatchedAvaloniaDirectory)' == ''">$(HOME)/Developer/avalonia-patched-out</LumaChartPatchedAvaloniaDirectory>
+    <LumaChartPatchedAvaloniaIOS>$(LumaChartPatchedAvaloniaDirectory)/Avalonia.iOS.dll</LumaChartPatchedAvaloniaIOS>
+    <LumaChartUsePatchedAvaloniaIOS>false</LumaChartUsePatchedAvaloniaIOS>
+    <LumaChartUsePatchedAvaloniaIOS Condition="Exists('$(LumaChartPatchedAvaloniaIOS)')">true</LumaChartUsePatchedAvaloniaIOS>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(LumaChartUsePatchedAvaloniaIOS)' == 'true'">
+    <!-- The package still supplies its dependencies and build targets; only the
+         assembly it would otherwise contribute is replaced. -->
+    <PackageReference Update="Avalonia.iOS" ExcludeAssets="compile;runtime" />
+    <Reference Include="Avalonia.iOS">
+      <HintPath>$(LumaChartPatchedAvaloniaIOS)</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!--
+    There was a second patched assembly here and it is deliberately gone.
+
+    Avalonia.Skia's SKCacheBase builds its pooled Skia objects with
+    `new TCachedItem()` behind a new() constraint, which the compiler lowers to
+    Activator.CreateInstance<T>(); that was the reflective call site behind the
+    per-frame ExecutionEngineException quoted beside DynamicCodeSupport above,
+    and it was patched away with a CreateItem() override per cache before the
+    real cause was known.
+
+      at System.Activator.CreateInstance[SKPaint]()
+      at Avalonia.Skia.SKCacheBase`2[[SkiaSharp.SKPaint..],[Avalonia.Skia.SKPaintCache..]].Get()
+      at Avalonia.Skia.DrawingContextImpl..ctor(CreateInfo, IDisposable[])
+      at Avalonia.Rendering.Composition.Server.ServerCompositionTarget.Render()
+
+    That patch removed one reflective call site. DynamicCodeSupport=false
+    removes the reason any of them fail, so it became redundant — confirmed on
+    device: built against the stock package assembly, the editor renders the
+    full login surface, captcha bitmap included, with the Avalonia log sink
+    reporting zero warnings. Do not reintroduce it; if a frame ever throws
+    ExecutionEngineException again, the switch above is what to check.
+  -->
+
+  <!--
+    The second patched dependency, for Japanese kanji romanization.
+
+    LibNMeCab resolves a dictionary's charset by comparing encoding names with
+    CompareOptions.IgnoreCase | CompareOptions.IgnoreSymbols. .NET on Apple
+    mobile answers globalization through the platform instead of ICU and refuses
+    that combination, so the first comparison threw and Kawazu's converter never
+    constructed:
+
+      System.PlatformNotSupportedException:
+      PlatformNotSupported_HybridGlobalizationWithCompareOptions, IgnoreCase, IgnoreSymbols
+        at System.Globalization.CompareInfo.Compare(String, String, CompareOptions)
+        at NMeCab.Core.MeCabDictionary.Open(String fileName)
+        at Kawazu.KawazuConverter..ctor(String dicPath)
+
+    Neither upgrading nor HybridGlobalization=false helps: upstream master still
+    has the same line, and the iOS runtime pack ships no ICU to switch to, so the
+    runtime stays on the platform implementation whatever the switch says.
+
+    The patch is one method — same rule, expressed without a collator. Built by
+    tools/nmecab/build-patched-libnmecab.sh; the assembly has no strong name, so
+    it drops in. Arrives transitively through LibNMeCab.IpaDicBin, so it is
+    pinned here to take ExcludeAssets.
+
+    Exists() makes this self-disabling: without the staged file the stock package
+    is used and iOS simply has no kanji romanization. Windows and Android have
+    real ICU and never touch this assembly either way.
+  -->
+  <PropertyGroup>
+    <LumaChartPatchedNMeCab Condition="'$(LumaChartPatchedNMeCab)' == ''">$(HOME)/Developer/nmecab-patched-out/LibNMeCab.dll</LumaChartPatchedNMeCab>
+    <LumaChartUsePatchedNMeCab>false</LumaChartUsePatchedNMeCab>
+    <LumaChartUsePatchedNMeCab Condition="Exists('$(LumaChartPatchedNMeCab)')">true</LumaChartUsePatchedNMeCab>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(LumaChartUsePatchedNMeCab)' == 'true'">
+    <PackageReference Include="LibNMeCab" Version="0.10.1" ExcludeAssets="compile;runtime" />
+    <Reference Include="LibNMeCab">
+      <HintPath>$(LumaChartPatchedNMeCab)</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="LumaChartReportPatchedAvaloniaIOS" BeforeTargets="Build">
+    <Message Importance="high" Condition="'$(LumaChartUsePatchedAvaloniaIOS)' == 'true'"
+             Text="LumaChart: using patched Avalonia.iOS from $(LumaChartPatchedAvaloniaIOS)" />
+    <Message Importance="high" Condition="'$(LumaChartUsePatchedAvaloniaIOS)' != 'true'"
+             Text="LumaChart: using the stock Avalonia.iOS assembly from the package" />
+    <Message Importance="high" Condition="'$(LumaChartUsePatchedNMeCab)' == 'true'"
+             Text="LumaChart: using patched LibNMeCab from $(LumaChartPatchedNMeCab)" />
+    <Message Importance="high" Condition="'$(LumaChartUsePatchedNMeCab)' != 'true'"
+             Text="LumaChart: using the stock LibNMeCab assembly — kanji romanization will not work on iOS" />
+  </Target>
+
+  <!--
+    Kawazu reads the IpaDic corpus from disk. Android extracts it from APK
+    assets because assets there are not real files; on iOS it is an ordinary
+    bundle resource that only needs locating.
+
+    LumaChart.Avalonia.Mobile switches off the package's own include, because
+    the files it contributes carry no `PublishFolderType` and the iOS SDK then
+    silently drops them from the bundle. The corpus is therefore contributed
+    here, in the project that actually builds the bundle, with that metadata
+    set — item metadata does not survive the project-reference flow, so it has
+    to be declared at this level.
+
+    The version is pinned the same way LumaChart.Android pins it for its
+    AndroidAsset include; both must move together with the package reference in
+    LumaChart.Avalonia.SharedSource.props.
+  -->
+  <PropertyGroup>
+    <LumaChartIpaDicVersion>0.10.0</LumaChartIpaDicVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <BundleResource Include="$(NuGetPackageRoot)/libnmecab.ipadicbin/$(LumaChartIpaDicVersion)/content/IpaDic/*.*">
+      <Link>IpaDic/%(Filename)%(Extension)</Link>
+      <PublishFolderType>Resource</PublishFolderType>
+    </BundleResource>
+  </ItemGroup>
+</Project>

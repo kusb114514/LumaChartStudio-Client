@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          android:installLocation="auto">
+  <uses-permission android:name="android.permission.INTERNET" />
+  <!-- hasFragileUserData: the chart library lives in app-private storage, which
+       uninstall deletes. With this set, Android 10+ asks on uninstall whether
+       to keep the app's data instead of removing it silently. -->
+  <application android:label="LumaChart Studio" android:icon="@drawable/icon" android:theme="@style/MyTheme.NoActionBar" android:hasFragileUserData="true" />
+</manifest>

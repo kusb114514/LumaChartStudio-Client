@@ -1,0 +1,97 @@
+diff --git a/src/iOS/Avalonia.iOS/DisplayLinkTimer.cs b/src/iOS/Avalonia.iOS/DisplayLinkTimer.cs
+index e8a313a..eea3994 100644
+--- a/src/iOS/Avalonia.iOS/DisplayLinkTimer.cs
++++ b/src/iOS/Avalonia.iOS/DisplayLinkTimer.cs
+@@ -13,22 +13,82 @@ class DisplayLinkTimer : IRenderTimer
+         private volatile Action<TimeSpan>? _tick;
+         private Stopwatch _st = Stopwatch.StartNew();
+ 
++        // Held for the lifetime of the timer. CADisplayLink.Create wraps a
++        // managed callback, and on the main-thread path below nothing else
++        // refers to either of them once the constructor returns: the original
++        // worker path kept them alive by accident, through the closure captured
++        // by the thread the instance holds. Without this field the link is
++        // collected shortly after startup and simply stops firing — which on
++        // device looks like a working app that renders nothing, with the main
++        // run loop still turning and the GPU flat at zero.
++        private readonly CADisplayLink _link;
++
++        // LumaChart patch for iPadOS 26.
++        //
++        // iOS 26 refuses changes to a view's layer properties made off the main
++        // thread. Rendering has always run on this class's own thread, and both
++        // backends touch the render layer from it: EaglLayerSurface goes through
++        // LayerFbo.TryCreate to renderbufferStorage:fromDrawable:, which sets
++        // the layer's contents, and the Metal path sets CAMetalLayer.Device and
++        // DrawableSize. The refusal is invisible to GL — the framebuffer still
++        // reports complete and nothing throws — so every frame is drawn and
++        // presented into a layer whose contents were never attached, which on
++        // device is a black screen with correct geometry and no error after the
++        // first. The device log shows it once per launch:
++        //
++        //   Modifying properties of a view's layer off the main thread is not
++        //   allowed: view <Avalonia_iOS_AvaloniaView>
++        //
++        // with OpenGLES below QuartzCore below UIKit in the backtrace.
++        //
++        // Driving the display link from the main run loop puts all of that work
++        // on the main thread. EaglLayerSurface.CheckThread compares against
++        // TimerThread rather than assuming a worker thread, so pointing
++        // TimerThread at the main thread keeps that check satisfied.
++        //
++        // AVALONIA_IOS_RENDER_THREAD=worker restores the original behaviour.
++        private static bool UseMainThread =>
++            !string.Equals(
++                Environment.GetEnvironmentVariable("AVALONIA_IOS_RENDER_THREAD"),
++                "worker",
++                StringComparison.OrdinalIgnoreCase);
++
+         public DisplayLinkTimer()
+         {
+-            var link = CADisplayLink.Create(OnLinkTick);
+-            TimerThread = new Thread(() =>
++            _link = CADisplayLink.Create(OnLinkTick);
++
++            if (UseMainThread)
+             {
+-                link.AddToRunLoop(NSRunLoop.Current, NSRunLoopMode.Common);
+-                NSRunLoop.Current.Run();
+-            });
+-            TimerThread.Start();
+-            UIApplication.Notifications.ObserveDidEnterBackground((_,__) => link.Paused = true);
+-            UIApplication.Notifications.ObserveWillEnterForeground((_, __) => link.Paused = false);
++                // Platform.Register is reached from FinishedLaunching, so the
++                // thread constructing this is the main thread.
++                TimerThread = Thread.CurrentThread;
++                RunsInBackground = false;
++                _link.AddToRunLoop(NSRunLoop.Main, NSRunLoopMode.Common);
++            }
++            else
++            {
++                RunsInBackground = true;
++                var link = _link;
++                TimerThread = new Thread(() =>
++                {
++                    link.AddToRunLoop(NSRunLoop.Current, NSRunLoopMode.Common);
++                    NSRunLoop.Current.Run();
++                });
++                TimerThread.Start();
++            }
++
++            UIApplication.Notifications.ObserveDidEnterBackground((_,__) => _link.Paused = true);
++            UIApplication.Notifications.ObserveWillEnterForeground((_, __) => _link.Paused = false);
+         }
+ 
+         public Thread TimerThread { get;  }
+-        
+-        public bool RunsInBackground => true;
++
++        // Reports what the timer actually does. Under the main-thread mode above
++        // the ticks are no longer delivered on a worker, and saying otherwise
++        // would leave the render loop marshalling against an assumption that no
++        // longer holds. Avalonia's own UiThreadRenderTimer reports false here
++        // for the same reason.
++        public bool RunsInBackground { get; }
+ 
+         // TODO: start/stop on RenderLoop request
+         public Action<TimeSpan>? Tick

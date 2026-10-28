@@ -1,0 +1,18 @@
+<!--
+  macOS-only solution.
+
+  LumaChart.iOS targets net10.0-ios and therefore cannot be built on Windows at
+  all, so adding it to LumaChartStudio.slnx would break the Windows and Android
+  build gate. LumaChart.Avalonia.Mobile is plain net8.0 and stays in the main
+  solution on purpose: it compiles the whole shared editor source in its iOS
+  configuration, so a Windows build still catches iOS source breakage without
+  needing a Mac.
+-->
+<Solution>
+  <Project Path="LumaChart.Application/LumaChart.Application.csproj" />
+  <Project Path="LumaChart.Avalonia.Mobile/LumaChart.Avalonia.Mobile.csproj" />
+  <Project Path="LumaChart.Core/LumaChart.Core.csproj" />
+  <Project Path="LumaChart.iOS/LumaChart.iOS.csproj" />
+  <Project Path="LumaChart.Online/LumaChart.Online.csproj" />
+  <Project Path="LumaChart.Storage.Abstractions/LumaChart.Storage.Abstractions.csproj" />
+</Solution>

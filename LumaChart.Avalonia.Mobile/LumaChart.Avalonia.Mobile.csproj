@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The iOS counterpart of LumaChart.Avalonia.Shared: it compiles the very same
+    LumaChart.Avalonia editor source through the shared props file, so there is
+    no second editor UI and no second copy of the file list to keep in sync.
+
+    It stays plain net8.0 rather than net10.0-ios because nothing in the editor
+    source needs iOS bindings. Only LumaChart.iOS does, exactly as Android keeps
+    its bindings in LumaChart.Android.
+  -->
+  <Import Project="..\LumaChart.Avalonia.SharedSource.props" />
+
+  <PropertyGroup>
+    <!--
+      This project must resolve its packages against the *iOS* framework, not a
+      portable one. SkiaSharp — and any package with platform-specific assets —
+      ships a different managed assembly and a different native asset per target
+      framework. Built as plain net8.0 this project pulled SkiaSharp's desktop
+      managed assembly and none of its iOS native assets, which produced two
+      separate device failures: libSkiaSharp missing from the bundle, and then,
+      once it was added by hand, a trap inside libSkiaSharp on the finalizer
+      thread from the mismatched managed/native pair.
+
+      Windows keeps building only the net8.0 target, so LumaChartStudio.slnx
+      still compiles the whole shared editor source and catches source breakage
+      without a Mac; the iOS target is added only where it can actually build.
+    -->
+    <TargetFrameworks>net8.0</TargetFrameworks>
+    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('OSX'))">net8.0;net10.0-ios26.2</TargetFrameworks>
+    <!--
+      Selects the non-Win32 form of the two Windows compatibility surfaces.
+      Unlike Android, iOS does not reference Avalonia.Win32 at all: it is a
+      desktop backend full of user32/gdi32 P/Invokes, and dragging it through
+      the iOS AOT and linker stages is risk with no upside.
+    -->
+    <DefineConstants>$(DefineConstants);LUMACHART_IOS</DefineConstants>
+
+    <!--
+      LibNMeCab.IpaDicBin contributes the IpaDic corpus as plain `Content` with
+      no `PublishFolderType`. The iOS SDK cannot infer one for `.bin`, `.dic`
+      and extension-less files, so it warns and then silently leaves them out of
+      the app bundle — romanization would simply be missing at runtime with no
+      other symptom. Tagging the items here does not help, because custom item
+      metadata does not survive the project-reference flow into the app.
+
+      This project is where the package's targets run, so it is the only place
+      the include can be switched off. LumaChart.iOS then contributes the corpus
+      itself, with the metadata iOS needs. Nothing needs the dictionary beside
+      this library: the host passes an explicit root to Kawazu.
+
+      Android is unaffected — LumaChart.Avalonia.Shared keeps the default and
+      LumaChart.Android extracts the same corpus from APK assets.
+    -->
+    <MeCabUseDefaultDictionary>false</MeCabUseDefaultDictionary>
+  </PropertyGroup>
+
+  <!--
+    Only the iOS target participates in trim analysis, and it inherits the app's
+    `TrimMode=partial`. Under partial trim these assemblies are copied whole, so
+    the reflection-based System.Text.Json findings they report cannot occur.
+    See LumaChart.iOS.csproj for the full reasoning and for the condition under
+    which these must be reinstated.
+  -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-ios26.2'">
+    <NoWarn>$(NoWarn);IL2026;IL2104</NoWarn>
+  </PropertyGroup>
+</Project>
